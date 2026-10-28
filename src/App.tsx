@@ -27,6 +27,7 @@ import {
 } from './services/dataService';
 import SignaturePad from './components/SignaturePad';
 import AcceptanceTests from './components/AcceptanceTests';
+import AlertsPanel, { calculateOverdueInfo } from './components/AlertsPanel';
 
 // ==========================================
 // ICONOS SVG ACCESIBLES SIN DEPENDENCIAS
@@ -399,6 +400,38 @@ export default function App() {
     }
   };
 
+  // Ubicar tarea con desplazamiento suave
+  const handleScrollToTask = (taskId: string) => {
+    const el = document.getElementById(`task-row-${taskId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-4', 'ring-rose-400');
+      setTimeout(() => el.classList.remove('ring-4', 'ring-rose-400'), 2000);
+    }
+  };
+
+  // Simular tarea con retraso > 48h para pruebas interactivas
+  const handleGenerateTestDelayedTask = () => {
+    const testTask: Task = {
+      id: `t-urg-${Date.now()}`,
+      centerId: currentCenterId,
+      title: 'Supervisión urgente de signos vitales y retiro de medicación (Retraso > 48h)',
+      department: 'Enfermería',
+      assigneeRole: 'Enfermeria',
+      assigneeName: 'Dra. Elena Vargas',
+      dueDate: '2026-03-01', // Vencida hace más de 48h
+      status: 'vencida',
+      priority: 'alta',
+      evidenceRequired: true,
+    };
+    setAppState(prev => ({
+      ...prev,
+      tasks: [testTask, ...prev.tasks],
+    }));
+    logAudit('TAREA_SIMULADA_48H', 'tasks', 'Tarea con retraso superior a 48h simulada para comprobar el Panel de Alertas.');
+    showToast('Alerta activada: Se agregó una tarea con retraso > 48h con borde rojo animado.');
+  };
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col font-sans">
       
@@ -572,6 +605,21 @@ export default function App() {
         {/* ==================================================== */}
         {currentTab === 'inicio' && (
           <div className="space-y-6">
+            {/* PANEL DE ALERTAS CRÍTICAS (> 48 HORAS DE RETRASO) */}
+            <AlertsPanel 
+              tasks={appState.tasks.filter(t => t.centerId === currentCenterId)}
+              onCompleteTask={(task) => {
+                setAppState(prev => ({
+                  ...prev,
+                  tasks: prev.tasks.map(t => t.id === task.id ? { ...t, status: 'completada', completedAt: new Date().toISOString(), completedBy: currentUser.name } : t)
+                }));
+                logAudit('TAREA_COMPLETADA_ALERTA', 'tasks', `Tarea crítica "${task.title}" completada desde Panel de Alertas por ${currentUser.name}`);
+                showToast(`Tarea urgente "${task.title}" atendida y completada.`);
+              }}
+              onScrollToTask={handleScrollToTask}
+              onGenerateTestDelayedTask={handleGenerateTestDelayedTask}
+            />
+
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap justify-between items-center gap-4">
               <div>
                 <h1 className="text-xl font-bold text-slate-900">
@@ -626,7 +674,9 @@ export default function App() {
                 <div className="text-2xl font-black text-rose-600 mt-1">
                   {appState.tasks.filter(t => t.centerId === currentCenterId && t.status !== 'completada').length}
                 </div>
-                <div className="text-[11px] text-rose-600 font-semibold mt-1">1 marcada con fecha vencida (R10)</div>
+                <div className="text-[11px] text-rose-600 font-semibold mt-1">
+                  {appState.tasks.filter(t => t.centerId === currentCenterId && calculateOverdueInfo(t.dueDate, t.status).isCriticalOverdue).length} con retraso crítico &gt; 48h
+                </div>
               </div>
 
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -645,56 +695,97 @@ export default function App() {
                   <h2 className="font-bold text-slate-900 text-sm">Tareas prioritarias para {currentRole}</h2>
                   <p className="text-[11px] text-slate-500">Regla R10: Las tareas no se autocompletan ni reasignan sin acción humana</p>
                 </div>
-                <button 
-                  onClick={() => setShowTaskModal(true)}
-                  className="text-xs bg-[#0E2A47] text-white px-3 py-1.5 rounded-lg font-bold hover:bg-[#153a61]"
-                >
-                  + Asignar Tarea
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={handleGenerateTestDelayedTask}
+                    className="text-xs bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2.5 py-1.5 rounded-lg font-bold transition"
+                    title="Simular nueva tarea con retraso superior a 48h"
+                  >
+                    + Simular Tarea (+48h)
+                  </button>
+                  <button 
+                    onClick={() => setShowTaskModal(true)}
+                    className="text-xs bg-[#0E2A47] text-white px-3 py-1.5 rounded-lg font-bold hover:bg-[#153a61]"
+                  >
+                    + Asignar Tarea
+                  </button>
+                </div>
               </div>
 
               <div className="divide-y divide-slate-100 text-xs">
                 {appState.tasks
                   .filter(t => t.centerId === currentCenterId)
-                  .map(task => (
-                    <div key={task.id} className="p-4 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50 transition">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] uppercase font-black px-2 py-0.5 rounded ${
-                            task.status === 'vencida' ? 'bg-rose-100 text-rose-800' : task.status === 'completada' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {task.status}
-                          </span>
-                          <span className="font-bold text-slate-900 text-sm">{task.title}</span>
-                        </div>
-                        <p className="text-slate-500">
-                          Depto: <strong>{task.department}</strong> &middot; Responsable: {task.assigneeName || task.assigneeRole} &middot; Vence: {task.dueDate} &middot; Evidencia requerida: {task.evidenceRequired ? 'Sí' : 'No'}
-                        </p>
-                      </div>
+                  .map(task => {
+                    const overdue = calculateOverdueInfo(task.dueDate, task.status);
+                    const isCritical = overdue.isCriticalOverdue;
 
-                      <div>
-                        {task.status !== 'completada' ? (
-                          <button 
-                            onClick={() => {
-                              setAppState(prev => ({
-                                ...prev,
-                                tasks: prev.tasks.map(t => t.id === task.id ? { ...t, status: 'completada', completedAt: new Date().toISOString(), completedBy: currentUser.name } : t)
-                              }));
-                              logAudit('TAREA_COMPLETADA', 'tasks', `Tarea "${task.title}" completada por ${currentUser.name}`);
-                              showToast(`Tarea "${task.title}" marcada como completada.`);
-                            }}
-                            className="bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 font-bold px-3 py-1.5 rounded-lg transition"
-                          >
-                            Marcar Realizada
-                          </button>
-                        ) : (
-                          <span className="text-emerald-700 font-bold flex items-center gap-1">
-                            <CheckCircleIcon /> Completada por {task.completedBy || 'Personal'}
-                          </span>
-                        )}
+                    return (
+                      <div 
+                        key={task.id} 
+                        id={`task-row-${task.id}`}
+                        className={`p-4 flex flex-wrap items-center justify-between gap-3 transition-all rounded-xl ${
+                          isCritical
+                            ? 'border-animated-red bg-rose-50/70 shadow-sm my-2'
+                            : 'hover:bg-slate-50 border border-transparent'
+                        }`}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            {isCritical ? (
+                              <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded bg-rose-600 text-white flex items-center gap-1.5 shadow-sm animate-pulse">
+                                <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                                Retraso Crítico (+{overdue.overdueHours}h)
+                              </span>
+                            ) : (
+                              <span className={`text-[10px] uppercase font-black px-2 py-0.5 rounded ${
+                                task.status === 'vencida' ? 'bg-rose-100 text-rose-800' : task.status === 'completada' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {task.status}
+                              </span>
+                            )}
+                            <span className={`text-sm ${isCritical ? 'font-black text-rose-950' : 'font-bold text-slate-900'}`}>
+                              {task.title}
+                            </span>
+                          </div>
+                          <p className="text-slate-500">
+                            Depto: <strong className="text-slate-700">{task.department}</strong> &middot; Responsable: <strong className="text-slate-700">{task.assigneeName || task.assigneeRole}</strong> &middot; Vence: <span className={isCritical ? 'font-mono font-black text-rose-700' : ''}>{task.dueDate}</span>
+                            {isCritical && (
+                              <span className="ml-2 font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded text-[11px]">
+                                ⚠️ Retraso de {overdue.overdueDays} días (+{overdue.overdueHours} hrs sin atender)
+                              </span>
+                            )}
+                            &middot; Evidencia requerida: {task.evidenceRequired ? 'Sí' : 'No'}
+                          </p>
+                        </div>
+
+                        <div>
+                          {task.status !== 'completada' ? (
+                            <button 
+                              onClick={() => {
+                                setAppState(prev => ({
+                                  ...prev,
+                                  tasks: prev.tasks.map(t => t.id === task.id ? { ...t, status: 'completada', completedAt: new Date().toISOString(), completedBy: currentUser.name } : t)
+                                }));
+                                logAudit('TAREA_COMPLETADA', 'tasks', `Tarea "${task.title}" completada por ${currentUser.name}`);
+                                showToast(`Tarea "${task.title}" marcada como completada.`);
+                              }}
+                              className={`font-bold px-3 py-1.5 rounded-lg transition shadow-sm ${
+                                isCritical 
+                                  ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-200' 
+                                  : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-300'
+                              }`}
+                            >
+                              {isCritical ? 'Resolver Urgente' : 'Marcar Realizada'}
+                            </button>
+                          ) : (
+                            <span className="text-emerald-700 font-bold flex items-center gap-1">
+                              <CheckCircleIcon /> Completada por {task.completedBy || 'Personal'}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
             </div>
           </div>
